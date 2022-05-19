@@ -323,6 +323,16 @@ abstract class AbstractShape implements ComparableInterface
         return $this->border;
     }
 
+    /**
+     * @return $this
+     */
+    public function setBorder(Border $pValue = null)
+    {
+        $this->border = $pValue;
+
+        return $this;
+    }
+
     public function getShadow(): ?Shadow
     {
         return $this->shadow;

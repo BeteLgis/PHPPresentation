@@ -412,6 +412,7 @@ class PowerPoint2007 implements ReaderInterface
             $oSlide = $this->oPhpPresentation->createSlide();
             $this->oPhpPresentation->setActiveSlideIndex($this->oPhpPresentation->getSlideCount() - 1);
             $oSlide->setRelsIndex('ppt/slides/_rels/' . $baseFile . '.rels');
+            $oSlide->setIsVisible($xmlReader->getAttribute('show', $xmlReader->getElement('/p:sld')) ?? 1);
 
             // Background
             $oElement = $xmlReader->getElement('/p:sld/p:cSld/p:bg/p:bgPr');
@@ -883,9 +884,9 @@ class PowerPoint2007 implements ReaderInterface
         $oSlide->addShape($oShape);
     }
 
-    protected function loadShapeRichText(XMLReader $document, DOMElement $node, AbstractSlide $oSlide): void
+    protected function loadShapeRichText(XMLReader $document, DOMElement $node, $oSlide): void
     {
-        if (!$document->elementExists('p:txBody/a:p/a:r', $node)) {
+        if (!$document->elementExists('p:txBody/a:p/a:r', $node) || !$oSlide instanceof AbstractSlide) {
             return;
         }
         // Core
@@ -894,6 +895,21 @@ class PowerPoint2007 implements ReaderInterface
         // Variables
         if ($oSlide instanceof AbstractSlide) {
             $this->fileRels = $oSlide->getRelsIndex();
+        }
+
+        $oElement = $document->getElement('p:spPr', $node);
+        if ($oElement instanceof \DOMElement) {
+            $oFill = $this->loadStyleFill($document, $oElement);
+            if ($oFill instanceof Fill) {
+                $oShape->setFill($oFill);
+            }
+
+            $oBorder = $document->getElement('a:ln', $oElement);
+            if ($oBorder instanceof \DOMElement) {
+                $border = new Border();
+                $this->loadStyleBorder($document, $oBorder, $border);
+                $oShape->setBorder($border);
+            }
         }
 
         $oElement = $document->getElement('p:spPr/a:xfrm', $node);
@@ -1199,6 +1215,12 @@ class PowerPoint2007 implements ReaderInterface
                     if ($oElementrPr->hasAttribute('u')) {
                         $oText->getFont()->setUnderline($oElementrPr->getAttribute('u'));
                     }
+                    if ($oElementrPr->hasAttribute('spc')) {
+                        $oText->getFont()->setCharacterSpacing((int)($oElementrPr->getAttribute('spc') / 100));
+                    }
+                    if ($oElementrPr->hasAttribute('baseline')) {
+                        $oText->getFont()->setSuperScript($oElementrPr->getAttribute('baseline') >= 0);
+                    }
                     // Color
                     $oElementSrgbClr = $document->getElement('a:solidFill/a:srgbClr', $oElementrPr);
                     if (is_object($oElementSrgbClr) && $oElementSrgbClr->hasAttribute('val')) {
@@ -1214,25 +1236,7 @@ class PowerPoint2007 implements ReaderInterface
                         );
                     }
                     // Font
-                    $oElementFontFormat = null;
-                    $oElementFontFormatLatin = $document->getElement('a:latin', $oElementrPr);
-                    if (is_object($oElementFontFormatLatin)) {
-                        $oText->getFont()->setFormat(Font::FORMAT_LATIN);
-                        $oElementFontFormat = $oElementFontFormatLatin;
-                    }
-                    $oElementFontFormatEastAsian = $document->getElement('a:ea', $oElementrPr);
-                    if (is_object($oElementFontFormatEastAsian)) {
-                        $oText->getFont()->setFormat(Font::FORMAT_EAST_ASIAN);
-                        $oElementFontFormat = $oElementFontFormatEastAsian;
-                    }
-                    $oElementFontFormatComplexScript = $document->getElement('a:cs', $oElementrPr);
-                    if (is_object($oElementFontFormatComplexScript)) {
-                        $oText->getFont()->setFormat(Font::FORMAT_COMPLEX_SCRIPT);
-                        $oElementFontFormat = $oElementFontFormatComplexScript;
-                    }
-                    if (is_object($oElementFontFormat) && $oElementFontFormat->hasAttribute('typeface')) {
-                        $oText->getFont()->setName($oElementFontFormat->getAttribute('typeface'));
-                    }
+                    $this->setFontName($document, $oElementrPr, $oText);
 
                     //} else {
                     // $oText = $oParagraph->createText();
@@ -1241,6 +1245,22 @@ class PowerPoint2007 implements ReaderInterface
                     $oText->setText($oSubSubElement->nodeValue);
                 }
             }
+        }
+    }
+
+    private function setFontName($document, $oElementrPr, $oText) {
+        $names = [];
+        foreach (['a:latin', 'a:ea', 'a:cs'] as $key) {
+            $oElementFontFormat = $document->getElement($key, $oElementrPr);
+            if (is_object($oElementFontFormat) && $oElementFontFormat->hasAttribute('typeface')) {
+                $atr = $oElementFontFormat->getAttribute('typeface');
+                if (strpos($atr, '+mj-') === false) {
+                    $names[] = $atr;
+                }
+            }
+        }
+        if ($names) {
+            $oText->getFont()->setName($names[0]);
         }
     }
 
